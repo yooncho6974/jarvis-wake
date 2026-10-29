@@ -47,10 +47,19 @@ $('settings-form').addEventListener('submit',async event=>{
 });
 $('forget').addEventListener('click',()=>{try{localStorage.removeItem(storageKey);}catch{}connection=null;lastStatus=null;latestCommand=null;demo=false;statusError=false;render();$('settings').close();log('저장된 연결 정보를 삭제했습니다.');toast('이 브라우저의 연결 정보가 삭제되었습니다.');});
 $('demo-toggle').addEventListener('click',()=>{if(busy)return;demo=!demo;demoAwake=false;render();log(demo?'시뮬레이션을 시작합니다. 깨우기 명령을 내려 주십시오.':'실제 PC 제어로 복귀했습니다. 연결을 확인하겠습니다.');if(!demo)refresh();});
+// 2026-10-29: a sleeping PC can miss the first signals while the ISP side re-finds it, so after the first send keep
+// re-sending for about a minute (spaced to stay under the relay's 3-per-10s limit) until the PC answers.
+let wakeRun=0;
+async function wakeBurst(){const run=++wakeRun,started=Date.now(),done=()=>log('PC가 깨어났습니다. 명령을 내려 주십시오.');
+  for(const at of [2,5,12,25,45,70]){
+    while(Date.now()-started<at*1000){await new Promise(r=>setTimeout(r,1000));if(run!==wakeRun||demo||!connection)return;if(lastStatus&&lastStatus.online){done();return;}}
+    const st=await refresh();if(run!==wakeRun||demo||!connection)return;if(st&&st.online){done();return;}
+    try{await request('/api/wake',{});log('PC 응답을 기다리며 깨우기 신호를 다시 보냈습니다.');}catch(_){}}
+  const st=await refresh();if(run===wakeRun&&!demo)log(st&&st.online?'PC가 깨어났습니다. 명령을 내려 주십시오.':'깨우기 신호를 모두 보냈습니다. PC가 깨어나면 상태가 바뀝니다.');}
 $('wake').addEventListener('click',async()=>{
   if(busy)return;if(!demo&&!connection){openSettings();return;}
   busy=true;phase='waking';render();window.jarvisVoice?.speak('주인님, 일어날게요. 사랑해요');log(demo?'시뮬레이션: 코어를 활성화하고 있습니다.':'깨우기 신호를 전송하고 있습니다.');
-  try{if(demo){await new Promise(r=>setTimeout(r,2300));demoAwake=true;log('시뮬레이션 완료. 명령을 기다리겠습니다.');}else{await request('/api/wake',{});log('호출 신호를 전송했습니다. PC의 응답을 확인하겠습니다.');toast('전송 완료. 실제 PC가 깨어날 때까지 잠시 기다려 주십시오.');await refresh();}}catch(error){log(friendlyError(error));toast(friendlyError(error));}finally{busy=false;phase=null;render();}
+  try{if(demo){await new Promise(r=>setTimeout(r,2300));demoAwake=true;log('시뮬레이션 완료. 명령을 기다리겠습니다.');}else{await request('/api/wake',{});log('호출 신호를 전송했습니다. PC의 응답을 확인하겠습니다.');toast('전송 완료. 실제 PC가 깨어날 때까지 잠시 기다려 주십시오.');await refresh();wakeBurst();}}catch(error){log(friendlyError(error));toast(friendlyError(error));}finally{busy=false;phase=null;render();}
 });
 $('sleep').addEventListener('click',()=>{
   if(busy)return;if(demo){if(!demoAwake){toast('시뮬레이션은 이미 절전 상태입니다.');return;}demoAwake=false;render();window.jarvisVoice?.speak('주인님, 잘 자요. 사랑해요');log('시뮬레이션: 절전 전환 완료. 다시 부르실 때까지 대기하겠습니다.');return;}
